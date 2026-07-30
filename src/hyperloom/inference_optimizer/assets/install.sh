@@ -1067,10 +1067,36 @@ ensure_bench_serving_deps() {
 # Fail-soft: lpips also pulls AlexNet weights on first use (network), so a
 # failed install must NOT abort the whole install — the wrapper degrades
 # gracefully (honest *_available=false) rather than crashing the run.
+#
+# Bug fix (shared-torch clobber): lpips declares an unbounded `torch>=0.4.0`.
+# A bare `pip install lpips` (no --no-deps) lets pip's resolver satisfy that
+# constraint from PyPI's own generic CUDA `torch` build instead of the
+# already-installed ROCm build this pod actually needs — silently upgrading
+# (replacing) the shared venv's torch out from under every other framework
+# session sharing it (atom/vllm/sglang all share one venv here). The install
+# step itself still reports success (exit 0); only a much-later
+# torch.cuda.is_available()==False deep in some other session's baseline/
+# profile task would have revealed it. Two-layer defense: (1) --no-deps so
+# this optional, unrelated install can never touch torch/torchvision
+# resolution in the first place; (2) snapshot the torch identity before and
+# verify+auto-rollback+die after, in case some *other* future optional dep
+# in this function does the same thing.
 _XDIT_QUALITY_DEPS=(
   "scikit-image:skimage"
   "lpips:lpips"
 )
+
+# Print `torch_version torch_hip` (space-separated; either field may be
+# empty) for the given PYTHON, or nothing if torch isn't importable at all.
+_probe_torch_identity() {
+  "$1" -c "
+try:
+    import torch
+    print(torch.__version__, getattr(torch.version, 'hip', None) or '')
+except Exception:
+    pass
+" 2>/dev/null
+}
 
 ensure_xdit_quality_deps() {
   log "ensuring xDiT image-quality gate deps (SSIM/LPIPS) in $PYTHON"
@@ -1095,15 +1121,46 @@ ensure_xdit_quality_deps() {
     log "dry-run; skipping xDiT quality dep install"
     return 0
   fi
-  log "installing missing xDiT quality deps: ${missing[*]}"
-  "$PYTHON" -m pip install --quiet --no-cache-dir \
+  # Snapshot torch's identity before touching this optional dep set, so a
+  # clobber (layer 2 defense) can be detected and rolled back below.
+  local _torch_before; _torch_before="$(_probe_torch_identity "$PYTHON")"
+  local _torch_ver_before="${_torch_before%% *}"
+  local _torch_hip_before="${_torch_before#* }"
+  [ "$_torch_hip_before" = "$_torch_before" ] && _torch_hip_before=""
+  log "installing missing xDiT quality deps: ${missing[*]} (--no-deps: this optional gate never resolves torch/torchvision)"
+  "$PYTHON" -m pip install --quiet --no-cache-dir --no-deps \
     "${PIP_EXTRA[@]}" "${missing[@]}" \
     || warn "failed to install xDiT quality deps: ${missing[*]} (gate degrades to MSE-only)"
   for pair in "${_XDIT_QUALITY_DEPS[@]}"; do
     import_name="${pair##*:}"
     "$PYTHON" -c "import ${import_name}" >/dev/null 2>&1 \
-      || warn "xDiT quality dep '${import_name}' not importable after install (gate excludes it)"
+      || warn "xDiT quality dep '${import_name}' not importable after install (gate excludes it; with --no-deps this is expected when torch/torchvision/scipy/etc. aren't already present)"
   done
+  # Layer-2 defense: even with --no-deps above, verify torch itself wasn't
+  # touched by this step (belt-and-suspenders against a future dep in this
+  # same function reintroducing the clobber). Only meaningful when torch was
+  # present and ROCm-built before we started.
+  if [ -n "$_torch_ver_before" ] && [ -n "$_torch_hip_before" ]; then
+    local _torch_after; _torch_after="$(_probe_torch_identity "$PYTHON")"
+    local _torch_ver_after="${_torch_after%% *}"
+    local _torch_hip_after="${_torch_after#* }"
+    [ "$_torch_hip_after" = "$_torch_after" ] && _torch_hip_after=""
+    if [ "$_torch_ver_after" != "$_torch_ver_before" ] || [ -z "$_torch_hip_after" ]; then
+      warn "xDiT quality dep install clobbered torch: was ${_torch_ver_before} (hip=${_torch_hip_before}), now ${_torch_ver_after:-<not importable>} (hip=${_torch_hip_after:-<none>})"
+      warn "auto-rolling back: reinstalling torch==${_torch_ver_before} (--no-deps, exact prior version)"
+      if "$PYTHON" -m pip install --quiet --no-cache-dir --no-deps --force-reinstall \
+           "${PIP_EXTRA[@]}" "torch==${_torch_ver_before}"; then
+        local _torch_restored; _torch_restored="$(_probe_torch_identity "$PYTHON")"
+        if [ "${_torch_restored%% *}" = "$_torch_ver_before" ] && [ -n "${_torch_restored#* }" ] && [ "${_torch_restored#* }" != "$_torch_restored" ]; then
+          warn "torch rollback OK: restored ${_torch_ver_before}"
+        else
+          die "xDiT quality dep install clobbered torch (${_torch_ver_before} -> ${_torch_ver_after:-<not importable>}) and rollback to torch==${_torch_ver_before} did not restore a ROCm build; refusing to continue with a broken shared torch. Fix manually: \"\$PYTHON\" -m pip install --force-reinstall --no-deps torch==${_torch_ver_before}, or set INFERENCE_OPTIMIZER_SKIP_TORCH_GATE=1 to bypass (NOT recommended -- every framework sharing this venv will fail at torch.cuda.is_available())."
+        fi
+      else
+        die "xDiT quality dep install clobbered torch (${_torch_ver_before} -> ${_torch_ver_after:-<not importable>}) and the rollback reinstall of torch==${_torch_ver_before} itself failed; refusing to continue with a broken shared torch. Fix manually: \"\$PYTHON\" -m pip install --force-reinstall --no-deps torch==${_torch_ver_before}."
+      fi
+    fi
+  fi
 }
 
 # --- 4c. Langfuse SDK (opt-in live trace push) ---
