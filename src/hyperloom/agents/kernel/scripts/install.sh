@@ -221,6 +221,19 @@ TRACELENS_MIRROR_DIR="${TRACELENS_MIRROR_DIR:-${_open_source_root}/TraceLens-int
 
 # Credentials fallback: env always wins. If any supported LLM credential is
 # missing from env, source $REPO_ROOT/.env but protect already-set values.
+#
+# Bug fix (session-path clobber): `set -a; . "$REPO_ROOT/.env"; set +a` sources
+# EVERY assignment in .env, not just the 5 credential vars this block cares
+# about. A concurrent/prior session sharing this same checkout may have
+# persisted ITS OWN USER_DATA_PATH / KERNEL_AGENT_ENV / MAGPIE_PATH /
+# HYPERLOOM_ROOT / PYTHONPATH / INFERENCEX_PATH into $REPO_ROOT/.env (see
+# upsert_dotenv_var calls below). Restoring only the credential snapshot left
+# those path vars clobbered for the rest of this script, so the kernel-agent
+# env file (and its writable-mirror paths) got written under the WRONG
+# session's directory whenever the caller used the single-gateway
+# SAFE_API_KEY/OPENAI_BASE_URL pair (which never sets ANTHROPIC_*/DEEPSEEK_*,
+# so this fallback always fires). Snapshot+restore every path var this
+# installer resolves before sourcing .env, not just the credential set.
 REPO_ROOT="${REPO_ROOT:-$(pwd)}"
 DOTENV="${REPO_ROOT}/.env"
 if [ -z "${ANTHROPIC_BASE_URL:-}" ] || [ -z "${ANTHROPIC_API_KEY:-}" ] \
@@ -232,6 +245,18 @@ if [ -z "${ANTHROPIC_BASE_URL:-}" ] || [ -z "${ANTHROPIC_API_KEY:-}" ] \
     _snap_anthropic_token="${ANTHROPIC_AUTH_TOKEN-}"
     _snap_deepseek_key="${DEEPSEEK_API_KEY-}"
     _snap_deepseek_url="${DEEPSEEK_BASE_URL-}"
+    _snap_user_data_path="${USER_DATA_PATH-}"
+    _snap_runtime_dir="${HYPERLOOM_RUNTIME_DIR-}"
+    _snap_kernel_agent_env="${KERNEL_AGENT_ENV-}"
+    _snap_hl_kernel_agent_root="${HYPERLOOM_KERNEL_AGENT_ROOT-}"
+    _snap_kernel_agent_root="${KERNEL_AGENT_ROOT-}"
+    _snap_magpie_path="${MAGPIE_PATH-}"
+    _snap_magpie_python="${MAGPIE_PYTHON-}"
+    _snap_pythonpath="${PYTHONPATH-}"
+    _snap_inferencex_path="${INFERENCEX_PATH-}"
+    _snap_hyperloom_root="${HYPERLOOM_ROOT-}"
+    _snap_tracelens_root="${TRACELENS_ROOT-}"
+    _snap_repo_root="${REPO_ROOT-}"
     set -a
     # shellcheck disable=SC1091
     . "$REPO_ROOT/.env"
@@ -241,8 +266,24 @@ if [ -z "${ANTHROPIC_BASE_URL:-}" ] || [ -z "${ANTHROPIC_API_KEY:-}" ] \
     [ -n "$_snap_anthropic_token" ] && export ANTHROPIC_AUTH_TOKEN="$_snap_anthropic_token"
     [ -n "$_snap_deepseek_key" ] && export DEEPSEEK_API_KEY="$_snap_deepseek_key"
     [ -n "$_snap_deepseek_url" ] && export DEEPSEEK_BASE_URL="$_snap_deepseek_url"
+    [ -n "$_snap_user_data_path" ] && export USER_DATA_PATH="$_snap_user_data_path"
+    [ -n "$_snap_runtime_dir" ] && export HYPERLOOM_RUNTIME_DIR="$_snap_runtime_dir"
+    [ -n "$_snap_kernel_agent_env" ] && export KERNEL_AGENT_ENV="$_snap_kernel_agent_env"
+    [ -n "$_snap_hl_kernel_agent_root" ] && export HYPERLOOM_KERNEL_AGENT_ROOT="$_snap_hl_kernel_agent_root"
+    [ -n "$_snap_kernel_agent_root" ] && export KERNEL_AGENT_ROOT="$_snap_kernel_agent_root"
+    [ -n "$_snap_magpie_path" ] && export MAGPIE_PATH="$_snap_magpie_path"
+    [ -n "$_snap_magpie_python" ] && export MAGPIE_PYTHON="$_snap_magpie_python"
+    [ -n "$_snap_pythonpath" ] && export PYTHONPATH="$_snap_pythonpath"
+    [ -n "$_snap_inferencex_path" ] && export INFERENCEX_PATH="$_snap_inferencex_path"
+    [ -n "$_snap_hyperloom_root" ] && export HYPERLOOM_ROOT="$_snap_hyperloom_root"
+    [ -n "$_snap_tracelens_root" ] && export TRACELENS_ROOT="$_snap_tracelens_root"
+    [ -n "$_snap_repo_root" ] && export REPO_ROOT="$_snap_repo_root"
     unset _snap_anthropic_url _snap_anthropic_key _snap_anthropic_token
     unset _snap_deepseek_key _snap_deepseek_url
+    unset _snap_user_data_path _snap_runtime_dir _snap_kernel_agent_env
+    unset _snap_hl_kernel_agent_root _snap_kernel_agent_root
+    unset _snap_magpie_path _snap_magpie_python _snap_pythonpath
+    unset _snap_inferencex_path _snap_hyperloom_root _snap_tracelens_root _snap_repo_root
     echo "[kernel-agent] loaded credentials fallback from $REPO_ROOT/.env (env wins)"
   fi
 fi
