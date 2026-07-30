@@ -217,6 +217,19 @@ def resolve_source(
         preferred when several editable sources exist), or ``("", "unresolved")``
         on a dictionary miss / no editable source.
     """
+    # Version-robust path (HYPERLOOM_SOURCE_RESOLVER=v2): resolve against the
+    # live installed tree instead of the JSON's captured paths. Lazy-imported to
+    # avoid a circular import (the v2 module reuses is_editable_source above).
+    if os.environ.get("HYPERLOOM_SOURCE_RESOLVER", "").strip().lower() == "v2":
+        try:
+            from . import source_resolver_v2
+
+            return source_resolver_v2.resolve_source(
+                op_name, framework=framework, device_kernel_name=device_kernel_name
+            )
+        except (ImportError, OSError, ValueError):
+            pass  # Fall through to the legacy JSON path on any v2 failure.
+
     mapping = _load_mapping()
     if not mapping or not op_name:
         return "", "unresolved"
