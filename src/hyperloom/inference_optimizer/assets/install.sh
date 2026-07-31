@@ -1466,8 +1466,24 @@ ensure_inferencex
 # tolerate it. Both need $INFERENCEX_PATH, which only ensure_inferencex exports
 # — running the patch before it silently skipped those targets and left
 # RUN_EVAL=true baselines aborting on 'Unknown parameter'.
+# --- 2c. RDNA4 runner-map shim ---------------------------------------------
+# Magpie's arch_to_runner map only knows Instinct + NVIDIA archs; on a Radeon
+# AI PRO R9700 (gfx1201) every benchmark aborts with
+# 'No runner type found for gfx1201'. Reuse the mi300x runner scripts (plain
+# serve + benchmark_serving) — unvalidated arch, adequate for single-GPU
+# bare-metal runs. Idempotent; fail-soft.
+ensure_magpie_gfx1201_runner() {
+  local sel="${MAGPIE_PATH}/Magpie/modes/benchmark/image_selector.py"
+  [ -f "$sel" ] || { warn "gfx1201 runner shim skipped (no image_selector.py under MAGPIE_PATH)"; return 0; }
+  if grep -q '"gfx1201"' "$sel"; then log "Magpie gfx1201 runner mapping already present"; return 0; fi
+  if [ "$DRY_RUN" -eq 1 ]; then log "would add gfx1201->mi300x runner mapping to ${sel}"; return 0; fi
+  sed -i 's|"gfx942": "mi300x",   # MI300X|"gfx942": "mi300x",   # MI300X\n            "gfx1201": "mi300x",  # Radeon AI PRO R9700 (RDNA4) — reuse mi300x runner scripts (unvalidated)|' "$sel"
+  grep -q '"gfx1201"' "$sel" && log "Magpie gfx1201 runner mapping added" || warn "gfx1201 runner shim did not apply (anchor line not found)"
+}
+
 if [ "$HYPERLOOM_BENCHMARK_BACKEND_LC" != "bypass" ]; then
   ensure_magpie_atomic_scripts_patch
+  ensure_magpie_gfx1201_runner
 fi
 ensure_bench_serving_deps
 ensure_xdit_quality_deps
@@ -1542,8 +1558,29 @@ PY
   fi
 }
 
+_write_kernel_agent_root() {
+  # With --skip-kernel-agent the chained installer that normally writes this
+  # export never runs, but CLI preflight requires HYPERLOOM_KERNEL_AGENT_ROOT
+  # even for --no-kernel sessions. Write it here unconditionally.
+  if [ "$DRY_RUN" -eq 1 ] || [ "$CHECK_ONLY" -eq 1 ]; then
+    log "would append HYPERLOOM_KERNEL_AGENT_ROOT=${HYPERLOOM_KERNEL_AGENT_ROOT} to ${KERNEL_AGENT_ENV}"
+    return 0
+  fi
+  mkdir -p "$(dirname "$KERNEL_AGENT_ENV")"
+  if [ -f "$KERNEL_AGENT_ENV" ] && grep -q '^export HYPERLOOM_KERNEL_AGENT_ROOT=' "$KERNEL_AGENT_ENV" 2>/dev/null; then
+    sed -i "s|^export HYPERLOOM_KERNEL_AGENT_ROOT=.*|export HYPERLOOM_KERNEL_AGENT_ROOT=${HYPERLOOM_KERNEL_AGENT_ROOT}|" "$KERNEL_AGENT_ENV"
+  else
+    {
+      echo ""
+      echo "# Kernel-agent skill root (required by CLI preflight even for --no-kernel runs)"
+      echo "export HYPERLOOM_KERNEL_AGENT_ROOT=${HYPERLOOM_KERNEL_AGENT_ROOT}"
+    } >> "$KERNEL_AGENT_ENV"
+  fi
+}
+
 _write_specialist_secret_env_opt_in
 _probe_framework_source_roots
+_write_kernel_agent_root
 
 _prune_dep_cache "InferenceX" "Magpie"
 log "install complete"
