@@ -207,7 +207,11 @@ def claude_sdk_env_options(
         or ""
     )
     if fallback_key:
-        source.setdefault("ANTHROPIC_API_KEY", fallback_key)
+        # An OAuth/bearer token must not be aliased into ANTHROPIC_API_KEY:
+        # Claude Code prefers x-api-key and a non-API-key value 401s there
+        # ("Invalid API key" on every orchestration turn).
+        if not (source.get("ANTHROPIC_AUTH_TOKEN") or "").strip():
+            source.setdefault("ANTHROPIC_API_KEY", fallback_key)
         source.setdefault("ANTHROPIC_AUTH_TOKEN", fallback_key)
     # Claude/Anthropic side reads only ANTHROPIC_CUSTOM_HEADERS.
     if source.get("ANTHROPIC_CUSTOM_HEADERS"):
