@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Optimizing a Model with ROCm Hyperloom | Radeon AI PRO R9700 Runbook</title>
+<meta name="description" content="Step-by-step runbook for running an autonomous Hyperloom inference optimization of your own model on a Radeon AI PRO R9700 (gfx1201) Linux workstation.">
+<style>
+  :root{
+    --bg:#0d0f12; --bg2:#14171c; --panel:#191d23; --border:#2a2f38;
+    --fg:#e8eaed; --dim:#9aa3af; --accent:#ed1c24; --accent2:#ff5a5f;
+    --code-bg:#0a0c0f; --note:#1b2a3a; --note-b:#3b82f6;
+    --warn:#3a2a1b; --warn-b:#f59e0b; --ok:#1b3a26; --ok-b:#22c55e;
+    --mono:'JetBrains Mono','Fira Code',ui-monospace,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.65 -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}
+  a{color:var(--accent2);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .layout{display:grid;grid-template-columns:270px minmax(0,1fr);max-width:1280px;margin:0 auto}
+  nav{position:sticky;top:0;height:100vh;overflow-y:auto;padding:28px 20px;border-right:1px solid var(--border);background:var(--bg2)}
+  nav h2{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:var(--dim);margin:22px 0 8px}
+  nav ul{list-style:none;margin:0;padding:0}
+  nav li a{display:block;padding:5px 10px;border-radius:6px;color:var(--dim);font-size:13.5px}
+  nav li a:hover{color:var(--fg);background:var(--panel);text-decoration:none}
+  nav li.sub a{padding-left:24px;font-size:13px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px}
+  .brand .amd{background:var(--accent);color:#fff;padding:2px 8px;border-radius:4px;font-size:13px;letter-spacing:.05em}
+  main{padding:40px 56px 100px;min-width:0}
+  header.hero{border-bottom:1px solid var(--border);padding-bottom:28px;margin-bottom:36px}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+  .chip{font-size:12px;padding:3px 12px;border-radius:999px;border:1px solid var(--border);background:var(--panel);color:var(--dim)}
+  .chip.red{border-color:var(--accent);color:var(--accent2)}
+  h1{font-size:34px;line-height:1.2;margin:10px 0 6px}
+  .subtitle{color:var(--dim);font-size:17px;max-width:70ch}
+  h2{font-size:25px;margin:56px 0 14px;padding-top:8px;border-top:1px solid var(--border)}
+  h2 .num{color:var(--accent2);font-family:var(--mono);font-size:18px;margin-right:10px}
+  h3{font-size:18px;margin:30px 0 10px}
+  p,li{max-width:82ch}
+  code{font-family:var(--mono);font-size:.86em;background:var(--panel);border:1px solid var(--border);border-radius:4px;padding:1px 6px}
+  pre{position:relative;background:var(--code-bg);border:1px solid var(--border);border-radius:10px;padding:16px 18px;overflow-x:auto;margin:14px 0}
+  pre code{background:none;border:none;padding:0;font-size:13.5px;line-height:1.6;display:block}
+  pre .cm{color:#6b7280}
+  pre .kw{color:#7dd3fc}
+  pre .st{color:#a5b4fc}
+  .copy{position:absolute;top:8px;right:8px;background:var(--panel);border:1px solid var(--border);color:var(--dim);border-radius:6px;font-size:11.5px;padding:4px 10px;cursor:pointer}
+  .copy:hover{color:var(--fg);border-color:var(--dim)}
+  .box{border-left:4px solid;border-radius:0 8px 8px 0;padding:12px 18px;margin:18px 0;font-size:14.5px}
+  .box b:first-child{display:block;margin-bottom:4px;font-size:13px;text-transform:uppercase;letter-spacing:.08em}
+  .note{background:var(--note);border-color:var(--note-b)}
+  .warn{background:var(--warn);border-color:var(--warn-b)}
+  .ok{background:var(--ok);border-color:var(--ok-b)}
+  table{border-collapse:collapse;width:100%;margin:16px 0;font-size:14px}
+  th,td{border:1px solid var(--border);padding:8px 12px;text-align:left;vertical-align:top}
+  th{background:var(--panel);font-size:12.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim)}
+  tr:nth-child(even) td{background:rgba(255,255,255,.015)}
+  .phase-flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:16px 0;font-family:var(--mono);font-size:13px}
+  .phase{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:8px 14px}
+  .phase.off{opacity:.38;text-decoration:line-through}
+  .phase.on{border-color:var(--ok-b)}
+  .arrow{color:var(--dim)}
+  .kv{display:grid;grid-template-columns:220px 1fr;gap:0;border:1px solid var(--border);border-radius:10px;overflow:hidden;margin:16px 0;font-size:14px}
+  .kv>div{padding:9px 14px;border-bottom:1px solid var(--border)}
+  .kv>div:nth-child(odd){background:var(--panel);color:var(--dim);font-size:12.5px;text-transform:uppercase;letter-spacing:.05em}
+  .kv>div:nth-last-child(-n+2){border-bottom:none}
+  footer{margin-top:80px;padding-top:24px;border-top:1px solid var(--border);color:var(--dim);font-size:13px}
+  @media(max-width:900px){.layout{grid-template-columns:1fr}nav{position:static;height:auto;border-right:none;border-bottom:1px solid var(--border)}main{padding:28px 20px 80px}}
+</style>
+</head>
+<body>
+<div class="layout">
+<nav>
+  <div class="brand"><span class="amd">AMD</span> AI Runbook</div>
+  <h2>On this page</h2>
+  <ul>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#how-it-works">How Hyperloom Works</a></li>
+    <li><a href="#system">Your System at a Glance</a></li>
+    <li><a href="#support">Support-Matrix Reality Check</a></li>
+    <li><a href="#preflight">Step 1 — Preflight</a></li>
+    <li><a href="#install">Step 2 — Install Hyperloom</a></li>
+    <li><a href="#setup">Step 3 — Run Setup</a></li>
+    <li><a href="#framework">Step 4 — Serving Framework</a></li>
+    <li><a href="#launch">Step 5 — Launch the Run</a></li>
+    <li class="sub"><a href="#sizing">Sizing for 32 GB VRAM</a></li>
+    <li><a href="#monitor">Step 6 — Monitor</a></li>
+    <li><a href="#results">Step 7 — Read the Results</a></li>
+    <li><a href="#flags">Flag Reference</a></li>
+    <li><a href="#trouble">Troubleshooting</a></li>
+    <li><a href="#resources">Resources</a></li>
+  </ul>
+</nav>
+<main>
+
+<header class="hero">
+  <div class="chips">
+    <span class="chip red">Radeon AI PRO R9700</span>
+    <span class="chip">Linux · Ubuntu</span>
+    <span class="chip">Advanced</span>
+    <span class="chip">~30 min setup + 3 h run</span>
+    <span class="chip">hyperloom · vllm · rocm · agentic-optimization</span>
+  </div>
+  <h1>Optimizing a Model with ROCm™ Hyperloom</h1>
+  <p class="subtitle">Run an autonomous, agentic end-to-end inference optimization of your own model on this workstation —
+  a Radeon AI PRO R9700 (gfx1201, 32 GB) with the rocm-cli TheRock ROCm 7.14 runtime — and read the validated
+  throughput gains it delivers.</p>
+</header>
+
+<section id="overview">
+<h2><span class="num">§</span>Overview</h2>
+<p><b>ROCm Hyperloom</b> is an autonomous agentic system that optimizes end-to-end LLM inference workloads on
+AMD GPUs. You give it a model, a serving framework, and a workload shape (concurrency, input/output lengths);
+it measures a baseline, then iteratively proposes, applies, benchmarks, and keeps-or-reverts optimizations —
+server arguments, environment variables, source patches, and (on Instinct hardware) GPU kernels — until the
+time budget runs out or the target gain is hit. The whole loop runs unattended and leaves behind a
+reproducible session directory with a final report and a machine-readable breakdown.</p>
+<p>It combines four sub-systems:</p>
+<table>
+  <tr><th>Component</th><th>Role</th><th>Hardware scope</th></tr>
+  <tr><td><a href="https://github.com/AMD-AGI/TraceLens">TraceLens</a></td><td>Profiling brain — consumes traces, finds bottleneck kernels, derives roofline targets</td><td>Hardware-agnostic</td></tr>
+  <tr><td><a href="https://github.com/AMD-AGI/Magpie">Magpie</a> + <a href="https://github.com/AMDResearch/intellikit">IntelliKit</a></td><td>Trace collection, benchmark runners, low-level GPU profiling</td><td>Instinct MI300X/MI325X/MI355X</td></tr>
+  <tr><td><a href="https://github.com/AMD-AGI/GEAK">GEAK</a></td><td>Multi-agent GPU kernel optimizer for hot kernels</td><td>Instinct MI300X/MI325X/MI355X</td></tr>
+  <tr><td>Arbor knowledge base</td><td>Recipe store of hardware learnings, pitfalls, and prior campaign artifacts that guides the search</td><td>Any</td></tr>
+</table>
+<div class="box note"><b>What you'll learn</b>
+How the Hyperloom optimization loop works · which phases run (and which must be disabled) on an RDNA4 workstation ·
+how to install, configure, launch, monitor, and interpret a full optimization session for your own model.</div>
+</section>
+
+<section id="how-it-works">
+<h2><span class="num">§</span>How Hyperloom Works</h2>
+<p>The Coordinator advances a session through a six-phase state machine. On this system the two
+Instinct-gated phases are disabled (see <a href="#support">the reality check</a> below), so the run
+concentrates on framework-level exploration and workload sweeps:</p>
+<div class="phase-flow">
+  <span class="phase on">PRELUDE<br><small style="color:var(--dim)">baseline</small></span><span class="arrow">→</span>
+  <span class="phase off">FRAMEWORK_AGENT</span><span class="arrow">→</span>
+  <span class="phase on">EXPLORE<br><small style="color:var(--dim)">args · env · patches</small></span><span class="arrow">→</span>
+  <span class="phase off">KERNEL_AGENT</span><span class="arrow">→</span>
+  <span class="phase on">SWEEP<br><small style="color:var(--dim)">conc / ISL / OSL</small></span><span class="arrow">→</span>
+  <span class="phase on">CLOSE<br><small style="color:var(--dim)">report</small></span>
+</div>
+<table>
+  <tr><th>Phase</th><th>What happens</th><th>On this system</th></tr>
+  <tr><td><code>PRELUDE</code></td><td>Target analysis, baseline throughput measurement, first performance analysis (roofline/profile)</td><td>Runs (baseline only; roofline disabled — Magpie profiling runners are Instinct-only)</td></tr>
+  <tr><td><code>FRAMEWORK_AGENT</code></td><td>Framework enablement: discovery, candidate patches, escalation ladder up to compiled builds</td><td>Disabled via <code>--no-framework-agent</code> (mirrors the shipped 3h preset)</td></tr>
+  <tr><td><code>EXPLORE</code></td><td>Searches server-argument and environment variants; specialists propose targeted patches; every KEEP is re-benchmarked and end-to-end revalidated</td><td><b>Main value on the R9700</b></td></tr>
+  <tr><td><code>KERNEL_AGENT</code></td><td>GEAK kernel optimization, GEMM tuning, operator tuning</td><td>Disabled via <code>--no-kernel</code> (GEAK targets gfx942/gfx950)</td></tr>
+  <tr><td><code>SWEEP</code></td><td>Confirms the optimized stack wins across concurrency and sequence-length frontiers</td><td>Runs</td></tr>
+  <tr><td><code>CLOSE</code></td><td>Final report (<code>reports/final.md</code>) and <code>session_breakdown.json</code></td><td>Runs</td></tr>
+</table>
+<p>All writes flow through a governed intent pipeline: the Orchestration agent proposes, a Critic reviews,
+an accuracy gate and PolicyGate enforce phase ordering, path sandboxing, and single-writer rules. Every kept
+change is benchmarked with the bundled InferenceX <code>benchmark_serving.py</code> client via Magpie
+wrappers; the headline objective is <b>output throughput in tok/s per GPU</b>.</p>
+</section>
+
+<section id="system">
+<h2><span class="num">§</span>Your System at a Glance</h2>
+<p>Verified on this workstation (2026-07-30):</p>
+<div class="kv">
+  <div>GPU</div><div>AMD Radeon AI PRO R9700 — Navi 48 / RDNA4 / <code>gfx1201</code>, 32 GB VRAM</div>
+  <div>CPU / RAM</div><div>Intel Core i9-14900KF (32 threads) · 123 GB RAM</div>
+  <div>Kernel driver</div><div><code>amdgpu</code> loaded; <code>/dev/kfd</code> and <code>/dev/dri/renderD128</code> present; user in <code>render</code>, <code>video</code>, <code>docker</code> groups</div>
+  <div>ROCm runtime</div><div>TheRock nightly wheel runtime via <b>rocm-cli</b>:<br><code>/home/mike/ROCm/runtimes/wheel/nightly-wheel-gfx120x-all-7-14-0a20260611</code> (ROCm 7.14.0a)</div>
+  <div>Python / torch</div><div>Python 3.12.13 in the runtime venv · <code>torch 2.9.1+rocm7.14.0a20260611</code> · <code>torch.cuda.is_available() == True</code>, device = "AMD Radeon AI PRO R9700"</div>
+  <div>Host Python</div><div>3.14.4 — too new for ROCm framework wheels; <b>use the runtime venv's 3.12</b> for everything below</div>
+</div>
+<div class="box ok"><b>Good news</b>
+The hard prerequisites — working amdgpu driver, ROCm userspace, a ROCm torch that sees the GPU, Python ≥3.10,
+and git — are already satisfied by the rocm-cli runtime. No system-level installs are needed.</div>
+</section>
+
+<section id="support">
+<h2><span class="num">§</span>Support-Matrix Reality Check</h2>
+<div class="box warn"><b>Important — unvalidated hardware</b>
+Hyperloom v1.0.0a1 is validated <em>only</em> on AMD Instinct MI300X / MI325X / MI355X with ROCm 7.2.x
+(<code>docs/compatibility.rst</code>). The CLI's <code>--gpu-type</code> flag literally accepts only
+<code>mi300x | mi308x | mi325x | mi355x</code> (<code>cli/parser.py</code>), and the bare-metal installer
+warns <code>untested (supported: gfx942/gfx950)</code> on any other architecture. Running on the R9700 is
+an <b>experimental, best-effort path</b>: expect rough edges, and treat any failure in the disabled-phase
+plumbing as out-of-contract.</div>
+<p>Concrete consequences for this workstation, and how this runbook handles each:</p>
+<table>
+  <tr><th>Constraint</th><th>Why</th><th>Mitigation in this runbook</th></tr>
+  <tr><td>Docker mode is out</td><td>The validated <code>primussafe/sglang</code> / <code>primussafe/vllm-openai-rocm</code> images ship gfx942/gfx950 kernels, not gfx1201</td><td>Bare-metal mode on the TheRock gfx1201 runtime</td></tr>
+  <tr><td><code>--gpu-type</code> can't name the R9700</td><td>Closed choices list</td><td>Omit the flag — the shipped 3h demo skill does the same ("omit for auto-detection")</td></tr>
+  <tr><td>Kernel phase unusable</td><td>GEAK / IntelliKit / AgentKernelArena are Instinct-only</td><td><code>--no-kernel</code></td></tr>
+  <tr><td>Roofline / Magpie profiling unusable</td><td>Magpie runner scripts and the ROCm profiler hotfix target Instinct; the stack here is ROCm 7.14 nightly, not 7.2.x</td><td><code>--no-enable-roofline</code> (with <code>--no-kernel</code> this also skips the TraceLens preflight)</td></tr>
+  <tr><td>Framework-agent phase skipped</td><td>Compiled-build escalation (AITER, sgl-kernel) assumes the Instinct stack</td><td><code>--no-framework-agent</code></td></tr>
+  <tr><td>SGLang ROCm wheels are gfx942-targeted</td><td><code>SGLANG_ROCM_EXTRA=rocm720</code> AMD wheel index</td><td>Use <b>vLLM built for gfx1201</b> as the serving framework</td></tr>
+</table>
+<p>What remains — baseline, the EXPLORE search over server arguments/environment/patches with
+benchmark-gated keeps, the concurrency/ISL/OSL sweep, and full reporting — is precisely the shipped
+<code>hyperloom-qwen3-8b-3h</code> preset shape, and is the highest-leverage automation for a
+single-GPU workstation anyway.</p>
+</section>
+
+<section id="preflight">
+<h2><span class="num">§</span>Step 1 — Preflight</h2>
+<p>Activate the rocm-cli runtime venv and confirm the GPU is visible and idle. Hyperloom's launch contract
+requires the GPU to be free of foreign serving processes and under ~500 MiB of allocated VRAM.</p>
+<pre><code><span class="cm"># The rocm-cli TheRock runtime is a Python venv — activate it</span>
+export ROCM_RUNTIME=/home/mike/ROCm/runtimes/wheel/nightly-wheel-gfx120x-all-7-14-0a20260611
+source "$ROCM_RUNTIME/bin/activate"
+
+<span class="cm"># GPU visible to ROCm and torch?</span>
+rocminfo | grep -E 'gfx|Marketing'
+python -c "import torch; print(torch.__version__, torch.cuda.get_device_name(0))"
+
+<span class="cm"># GPU idle? (expect ~0 MiB used, no serving PIDs)</span>
+amd-smi monitor -g 0 2>/dev/null || rocm-smi --showmeminfo vram</code></pre>
+<p>Expected: <code>gfx1201</code> / "AMD Radeon AI PRO R9700" from rocminfo, and
+<code>2.9.1+rocm7.14... AMD Radeon AI PRO R9700</code> from torch.</p>
+<div class="box note"><b>Note</b>
+Do all subsequent steps inside this venv, in the same shell. Hyperloom's installer and CLI must see the
+ROCm torch; the host Python 3.14 will not work.</div>
+</section>
+
+<section id="install">
+<h2><span class="num">§</span>Step 2 — Install Hyperloom</h2>
+<p>Create a dedicated, empty workspace directory. It becomes both the pip install target and the agent
+workspace — it will legitimately fill up with package directories.</p>
+<pre><code>mkdir -p ~/hyperloom-ws && cd ~/hyperloom-ws
+
+python -m pip install \
+  https://github.com/AMD-AGI/Hyperloom/releases/download/v1.0.0a1/hyperloom_inference_optimizer-1.0.0a1-py3-none-any.whl \
+  --target .
+
+export REPO_ROOT="$(pwd -P)"
+export PYTHONPATH="$REPO_ROOT"</code></pre>
+<div class="box note"><b>Alternative — source checkout</b>
+Developers can instead use the local clone at <code>/home/mike/dev/amd/Hyperloom</code> as
+<code>REPO_ROOT</code>; the workspace is then the repository root and <code>.env</code> is created there.
+Everything below is identical.</div>
+</section>
+
+<section id="setup">
+<h2><span class="num">§</span>Step 3 — Run Setup &amp; Configure <code>.env</code></h2>
+<p>Hyperloom's orchestration agents are LLM-driven — you need an Anthropic (or gateway) API key. If you
+work inside Cursor / Claude Code / Codex, open the workspace and run the interactive skill
+<code>/hyperloom-setup</code>. Headless, create <code>.env</code> directly (never paste real keys into an
+agent chat):</p>
+<pre><code>cat &gt; .env &lt;&lt;'EOF'
+ANTHROPIC_API_KEY=&lt;PLEASE_FILL_IN&gt;
+ANTHROPIC_BASE_URL=https://api.anthropic.com
+CLAUDE_MODEL=claude-opus-4-8
+# Writable root for sessions, logs, dependency checkouts, runtime env files
+USER_DATA_PATH=/home/mike/hyperloom-ws/session
+HYPERLOOM_RUN_MODE=baremetal
+EOF</code></pre>
+<p>Then run the packaged setup backend (bare-metal scenario). It executes
+<code>install_baremetal.sh</code> in five phases: base preflight → optional framework install →
+ROCm hotfix → credentials → runtime env persisted to <code>.env</code>.</p>
+<pre><code><span class="cm"># Installs vLLM (isolated venv) as part of setup — see Step 4 for why</span>
+python -m hyperloom.inference_optimizer.setup -- --install-framework vllm --yes</code></pre>
+<div class="box warn"><b>Expected warning</b>
+Phase 1 preflight will log the GPU architecture as <code>untested (supported: gfx942/gfx950)</code> —
+that is the known-unvalidated R9700 path, not a failure. The ROCm profiler hotfix (phase 3) only applies
+to eligible 7.2.x stacks and is skipped here; that's fine because roofline/profiling is disabled in Step 5.</div>
+</section>
+
+<section id="framework">
+<h2><span class="num">§</span>Step 4 — Serving Framework (vLLM for gfx1201)</h2>
+<p>Hyperloom optimizes a serving framework; it does not replace one. The framework must import and serve
+your model on <em>this</em> GPU before Hyperloom touches it. The setup step above already installed
+<b>vLLM</b> the way Hyperloom prescribes: the official ROCm vLLM wheel
+(<code>wheels.vllm.ai</code>, Python 3.12) pins its <em>own</em> torch, so it goes into a dedicated
+isolated venv (<code>VLLM_VENV_ROOT</code>, <code>--framework-env isolated</code> — the vLLM default)
+and never touches the TheRock torch in your runtime venv. ROCm 7.2+ vLLM wheels include RDNA4/gfx1201
+support.</p>
+<pre><code><span class="cm"># If you skipped it during setup, install manually into an isolated venv:</span>
+python -m pip install vllm --extra-index-url https://wheels.vllm.ai/rocm/
+
+<span class="cm"># Smoke test: serve your model and hit it once</span>
+export MODEL_PATH=/path/to/your/model     <span class="cm"># HF-style dir containing config.json</span>
+vllm serve "$MODEL_PATH" --max-model-len 4096 &amp;
+<span class="cm"># wait for "Application startup complete", then:</span>
+curl -s localhost:8000/v1/completions -H 'Content-Type: application/json' \
+  -d '{"model":"'"$MODEL_PATH"'","prompt":"Hello","max_tokens":8}'
+kill %1</code></pre>
+<div class="box warn"><b>Do not proceed until this smoke test passes.</b>
+If vLLM cannot load and serve the model on the R9700 by itself, Hyperloom cannot optimize it — the
+FRAMEWORK_AGENT phase that would normally repair enablement gaps is disabled on this hardware. Pick a
+model that fits: with 32 GB VRAM, bf16 models up to ~14B parameters (or larger with quantized weights)
+leave adequate KV-cache headroom.</div>
+<p>Record the framework in <code>.env</code> so demo skills and the CLI inherit it:</p>
+<pre><code>echo 'FRAMEWORK=vllm' &gt;&gt; .env</code></pre>
+</section>
+
+<section id="launch">
+<h2><span class="num">§</span>Step 5 — Launch the Optimization</h2>
+<p>First run the runtime installer (installs the optimizer package extras, Magpie benchmark wrappers, and
+the InferenceX benchmark client) and source the generated env file — required even for no-kernel runs:</p>
+<pre><code>bash "$REPO_ROOT/hyperloom/inference_optimizer/assets/install.sh" --skip-kernel-agent
+source "$USER_DATA_PATH/runtime/kernel-agent.env.sh"</code></pre>
+<div class="box note"><b>Note</b>
+With a source checkout the path is <code>$REPO_ROOT/src/hyperloom/inference_optimizer/assets/install.sh</code>.
+<code>--skip-kernel-agent</code> skips cloning the Instinct-only kernel tooling (GEAK etc.); the run-level
+switch is separately <code>--no-kernel</code> below.</div>
+<p>Now launch. This is the 3h-preset shape adapted to the R9700 — kernel, framework-agent, and roofline
+lanes off; EXPLORE and SWEEP on; 64-way concurrency at 1024/1024 tokens, bf16:</p>
+<pre><code>export LAUNCH_INFO_FILE="$USER_DATA_PATH/launch-info.json"
+export RUN_LOG="$USER_DATA_PATH/optimizer-run.log"
+
+setsid nohup python3 -m hyperloom.inference_optimizer.cli --verbose optimize \
+  --model "$MODEL_PATH" \
+  --framework vllm \
+  --tp 1 --ep 1 \
+  --conc 64 --isl 1024 --osl 1024 \
+  --precision bf16 \
+  --target-gain 30 \
+  --max-hours 3 \
+  --no-kernel \
+  --no-framework-agent \
+  --no-enable-roofline \
+  --tick-interval-sec 30 \
+  --launch-info-file "$LAUNCH_INFO_FILE" \
+  &gt; "$RUN_LOG" 2&gt;&amp;1 &lt; /dev/null &amp;</code></pre>
+<p>After ~30 seconds, verify health exactly the way the shipped skills do:</p>
+<pre><code>sleep 30
+REAL_PID=$(jq -r .pid "$LAUNCH_INFO_FILE")
+SESSION_DIR=$(jq -r .session_dir "$LAUNCH_INFO_FILE")
+test -d "/proc/$REAL_PID"            &amp;&amp; echo "process alive"
+test -f "$SESSION_DIR/manifest.json" &amp;&amp; echo "manifest ok"
+test -f "$SESSION_DIR/state.json"    &amp;&amp; echo "state ok"
+jq -r '.stop_reason // "running"' "$SESSION_DIR/state.json"</code></pre>
+<div class="box note"><b>Session layout</b>
+Sessions live at <code>$USER_DATA_PATH/&lt;model_basename&gt;/&lt;UTC_timestamp&gt;/</code> containing
+<code>manifest.json</code>, <code>state.json</code>, <code>storage/coordinator.db</code>,
+<code>runs/{baseline,explore,sweep,…}/&lt;task_id&gt;</code>, and <code>reports/</code>. Always resolve the
+session dir from the launch-info JSON — never by "latest timestamp".</div>
+
+<h3 id="sizing">Sizing the workload for 32 GB VRAM</h3>
+<table>
+  <tr><th>Knob</th><th>Guidance on the R9700</th></tr>
+  <tr><td><code>--tp</code></td><td>Always <code>1</code> — single GPU.</td></tr>
+  <tr><td><code>--conc</code></td><td>Set to your real target concurrency. <code>64</code> is a solid default; the SWEEP phase separately measures the ladder <code>256,128,64,32,16,8,4,2</code>.</td></tr>
+  <tr><td><code>--isl</code> / <code>--osl</code></td><td>Match production. Bigger values → bigger KV cache; at 1024/1024 with a ~8B bf16 model (~16 GB weights) the remaining ~14 GB of KV cache is comfortable. For 13–14B models, reduce concurrency or lengths.</td></tr>
+  <tr><td><code>--precision</code></td><td><code>bf16</code>. (FP8 presets target Instinct FP8 paths; unverified on RDNA4.)</td></tr>
+  <tr><td><code>--max-hours</code></td><td><code>3</code> for a first end-to-end check; raise to 8–12 once the pipeline is proven. SWEEP can re-loop into another EXPLORE cycle while budget remains.</td></tr>
+  <tr><td><code>--target-gain</code></td><td>Stop early once the validated cumulative gain (%) over baseline is reached. <code>30</code> is the preset default; alternatives: <code>--target-tput</code> (tok/s/GPU) or <code>--target-baseline-dir</code>.</td></tr>
+</table>
+</section>
+
+<section id="monitor">
+<h2><span class="num">§</span>Step 6 — Monitor</h2>
+<p>Poll <code>state.json</code> about every 300 seconds — no more often, per the skill contract:</p>
+<pre><code>watch -n 300 "jq '{phase, stop_reason, baseline_tput, cumulative_gain,
+  current_best: .current_best, last_sweep: .last_sweep}' $SESSION_DIR/state.json \
+  &amp;&amp; tail -n 5 $RUN_LOG"</code></pre>
+<table>
+  <tr><th>Field</th><th>Meaning</th></tr>
+  <tr><td><code>phase</code></td><td>Current pipeline phase (PRELUDE → EXPLORE → SWEEP → CLOSE here)</td></tr>
+  <tr><td><code>stop_reason</code></td><td><code>null</code>/absent while running; set on completion, budget exhaustion, target hit, or abort</td></tr>
+  <tr><td><code>baseline_tput</code></td><td>Baseline output throughput measured in PRELUDE (tok/s)</td></tr>
+  <tr><td><code>current_best</code></td><td>Best kept configuration: <code>{action, tput, accuracy}</code></td></tr>
+  <tr><td><code>cumulative_gain</code></td><td>Validated % gain over baseline — re-measured end-to-end after every KEEP, not a sum of deltas</td></tr>
+  <tr><td><code>explore_search.last_round</code></td><td>Latest explore variant decision</td></tr>
+</table>
+<p><b>Resume an interrupted session</b> (crash, reboot, Ctrl-C) — do not start a new one:</p>
+<pre><code>python3 -m hyperloom.inference_optimizer.cli optimize --resume \
+  --launch-info-file "$LAUNCH_INFO_FILE"
+<span class="cm"># Model/workload are read from the saved manifest — do not pass --model</span></code></pre>
+</section>
+
+<section id="results">
+<h2><span class="num">§</span>Step 7 — Read the Results</h2>
+<p>On CLOSE, Hyperloom writes the operator report to <code>$SESSION_DIR/reports/final.md</code> (and
+<code>final.json</code>) plus the machine-readable <code>$SESSION_DIR/session_breakdown.json</code>. Three
+fields to read first:</p>
+<pre><code>jq '{tput: .final.throughput_tok_s_per_gpu,
+     gain: .final.cumulative_gain_pct_validated,
+     path: .final.action_path}' "$SESSION_DIR/session_breakdown.json"</code></pre>
+<table>
+  <tr><th>Field</th><th>What it tells you</th></tr>
+  <tr><td><code>final.throughput_tok_s_per_gpu</code></td><td>Validated end-of-session serving throughput — the headline number</td></tr>
+  <tr><td><code>final.cumulative_gain_pct_validated</code></td><td>Validated gain over baseline</td></tr>
+  <tr><td><code>final.action_path</code></td><td>Ordered list of kept changes (server args, env vars, patches) that make up the optimized stack — this is your reproducible recipe</td></tr>
+</table>
+<div class="box ok"><b>Applying the wins</b>
+The <code>action_path</code> entries map directly to vLLM server arguments and environment variables. Bake
+them into your production launch command; each entry's benchmark evidence lives under
+<code>$SESSION_DIR/runs/explore/…</code>.</div>
+</section>
+
+<section id="flags">
+<h2><span class="num">§</span>Flag Reference (R9700-relevant subset)</h2>
+<table>
+  <tr><th>Flag</th><th>Default</th><th>Notes</th></tr>
+  <tr><td><code>--model</code></td><td>required</td><td>HF-style model directory; ignored on <code>--resume</code></td></tr>
+  <tr><td><code>--framework</code></td><td><code>sglang</code></td><td><code>sglang | vllm | atom | xdit</code> — use <code>vllm</code> here</td></tr>
+  <tr><td><code>--gpu-type</code></td><td>auto</td><td>Choices are Instinct-only; <b>omit on the R9700</b></td></tr>
+  <tr><td><code>--tp / --ep / --conc / --isl / --osl</code></td><td>1 / 1 / 64 / 1024 / 1024</td><td>Workload shape</td></tr>
+  <tr><td><code>--precision</code></td><td><code>bf16</code></td><td></td></tr>
+  <tr><td><code>--max-hours</code></td><td><code>2.0</code></td><td>Wall-clock budget</td></tr>
+  <tr><td><code>--target-gain / --target-tput / --target-baseline-dir</code></td><td>none</td><td>Mutually exclusive early-stop objectives</td></tr>
+  <tr><td><code>--no-kernel</code></td><td>off</td><td><b>Required here</b> — disables the KERNEL_AGENT phase (GEAK)</td></tr>
+  <tr><td><code>--no-framework-agent</code></td><td>off</td><td><b>Required here</b> — disables enablement/build escalation</td></tr>
+  <tr><td><code>--no-enable-roofline</code></td><td>off</td><td><b>Required here</b> — plain baseline instead of Magpie profile + TraceLens; combined with <code>--no-kernel</code> it also skips the TraceLens preflight</td></tr>
+  <tr><td><code>--no-explore</code></td><td>off</td><td>Leave explore ON — it's the value on this hardware</td></tr>
+  <tr><td><code>--enable-conc-sweep</code></td><td>on</td><td>Post-run concurrency ladder <code>256,128,64,32,16,8,4,2</code></td></tr>
+  <tr><td><code>--server-args</code></td><td>""</td><td>Extra baseline server arguments passed through to vLLM</td></tr>
+  <tr><td><code>--launch-info-file</code></td><td>none</td><td>Always set it — the authoritative way to find PID and session dir</td></tr>
+  <tr><td><code>--resume</code></td><td>off</td><td>Resume the saved session from the manifest</td></tr>
+</table>
+</section>
+
+<section id="trouble">
+<h2><span class="num">§</span>Troubleshooting</h2>
+<table>
+  <tr><th>Symptom</th><th>Cause / fix</th></tr>
+  <tr><td><code>argparse: invalid choice</code> for <code>--gpu-type</code></td><td>You passed an RDNA name. Omit the flag entirely.</td></tr>
+  <tr><td>Preflight logs <code>untested (supported: gfx942/gfx950)</code></td><td>Expected on gfx1201 — informational, not fatal.</td></tr>
+  <tr><td>Launch aborts on GPU-busy check</td><td>Another process holds &gt;~500 MiB VRAM. Stop stray vLLM/desktop compute jobs; re-check with <code>amd-smi</code>.</td></tr>
+  <tr><td><code>ImportError: libamdhip64.so / libhipblas.so</code></td><td>Mixed ROCm userspaces. Everything must run inside the rocm-cli runtime venv; don't point <code>ROCM_PATH</code>/<code>LD_LIBRARY_PATH</code> at another install.</td></tr>
+  <tr><td>vLLM OOM during baseline</td><td>Model + KV cache exceed 32 GB. Lower <code>--conc</code>, <code>--isl/--osl</code>, <code>--max-model-len</code>, or pick a smaller/quantized model.</td></tr>
+  <tr><td>Run dies with a TraceLens/Magpie profiling error</td><td>A profiling lane slipped through — confirm all three of <code>--no-kernel --no-framework-agent --no-enable-roofline</code> are on the command line.</td></tr>
+  <tr><td>Session seems stuck</td><td>Check <code>tail -f $RUN_LOG</code> and <code>state.json.phase</code>. Benchmarks at conc 64 legitimately take minutes. If the process died non-terminally, resume with <code>--resume</code>.</td></tr>
+</table>
+</section>
+
+<section id="resources">
+<h2><span class="num">§</span>Resources</h2>
+<ul>
+  <li><a href="https://github.com/AMD-AGI/Hyperloom">Hyperloom on GitHub</a> · <a href="https://rocm.docs.amd.com/projects/hyperloom/en/latest/index.html">ROCm docs</a></li>
+  <li>Repo docs: <code>docs/conceptual/optimization-loop.md</code> (phase machine), <code>docs/reference/session-breakdown.md</code> (full output schema), <code>docs/reference/environment-variables.md</code>, <code>docs/reference/troubleshooting.md</code></li>
+  <li>Shipped presets this runbook mirrors: <code>examples/hyperloom-qwen3-8b-3h/SKILL.md</code>, <code>examples/hyperloom-custom-advanced/SKILL.md</code></li>
+  <li><a href="https://github.com/AMD-AGI/TraceLens">TraceLens</a> · <a href="https://github.com/AMD-AGI/GEAK">GEAK</a> · <a href="https://github.com/AMD-AGI/Magpie">Magpie</a> · <a href="https://arxiv.org/abs/2606.12563">Arbor paper</a></li>
+  <li><a href="https://developer.amd.com/playbooks/">AMD AI Playbooks</a> — style this runbook follows</li>
+</ul>
+<footer>
+Runbook generated 2026-07-30 for the local workstation (Radeon AI PRO R9700 · rocm-cli TheRock 7.14 nightly).
+Hyperloom v1.0.0a1 · validated matrix: Instinct MI300X/MI325X/MI355X — R9700 path is experimental.
+AMD, ROCm, Radeon, and Instinct are trademarks of Advanced Micro Devices, Inc.
+</footer>
+</section>
+
+</main>
+</div>
+<script>
+document.querySelectorAll('pre').forEach(pre=>{
+  const b=document.createElement('button');b.className='copy';b.textContent='Copy';
+  b.onclick=()=>{navigator.clipboard.writeText(pre.querySelector('code').innerText)
+    .then(()=>{b.textContent='Copied!';setTimeout(()=>b.textContent='Copy',1500)});};
+  pre.appendChild(b);
+});
+</script>
+</body>
+</html>
