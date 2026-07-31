@@ -1033,6 +1033,24 @@ def materialize_config_with_envs(
     for key in unset_list:
         if isinstance(extra_envs, dict) and key in extra_envs:
             envs[str(key)] = str(extra_envs[key])
+    # ── Bare-metal PATH merge ──────────────────────────────────────────────
+    # Config YAMLs pin PATH to container locations (/opt/venv/bin:...). On a
+    # bare-metal host those dirs don't exist and the pinned value hides the
+    # live ROCm runtime and the framework venv: no rocm-smi on PATH means
+    # Magpie detects gpu_arch=None, and `vllm serve` is unresolvable. Keep the
+    # pinned entries first, prepend the task's own VIRTUAL_ENV/bin, and append
+    # any live PATH entries not already present. Container runs are unaffected
+    # (the pinned prefix already covers their live PATH).
+    _yaml_path = str(envs.get("PATH") or "").strip()
+    if _yaml_path:
+        _venv = str(envs.get("VIRTUAL_ENV") or "").strip()
+        _parts = (
+            ([str(Path(_venv) / "bin")] if _venv else [])
+            + _yaml_path.split(":")
+            + os.environ.get("PATH", "").split(":")
+        )
+        _seen: set[str] = set()
+        envs["PATH"] = ":".join(p for p in _parts if p and not (p in _seen or _seen.add(p)))
     output_dir.mkdir(parents=True, exist_ok=True)
     materialized = output_dir / out_name
     with materialized.open("w", encoding="utf-8") as f:
