@@ -167,7 +167,13 @@ def _dedupe_existing_dirs(candidates: list[Path]) -> list[Path]:
         except OSError:
             normalized = candidate.expanduser().absolute()
         key = str(normalized)
-        if key in seen or not normalized.is_dir():
+        try:
+            is_dir = normalized.is_dir()
+        except OSError:
+            # Unreadable candidate (e.g. /root/.aiter probed from a non-root
+            # workstation run) — treat as absent instead of crashing launch.
+            is_dir = False
+        if key in seen or not is_dir:
             continue
         seen.add(key)
         resolved.append(normalized)
